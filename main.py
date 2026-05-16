@@ -15,8 +15,7 @@ class Danmu(Star):
         self.MAX_DANMU = 15        # 最多保留的弹幕历史数量
         # =================================================
         self.app = Flask(__name__)
-        # 明确使用线程模式以避免对 eventlet/gevent 的隐式依赖（可选安装 eventlet 以启用原生 websocket）
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode="threading")
+        self.socketio = SocketIO(self.app, cors_allowed_origins="*")
         self.danmu_history = []
         self.ws_thread = None
         self.public_ip = None
@@ -53,17 +52,13 @@ class Danmu(Star):
         # 自动获取公网IP
         self.public_ip = self.get_public_ip()
         
-        # 后台线程启动 WebSocket 服务
-        # 使用封装方法确保向 socketio.run 传入正确的 app、host、port 等参数
-        def _run_socketio():
-            try:
-                logger.info(f"启动 SocketIO 服务，内网监听: 0.0.0.0:{self.WS_PORT}")
-                # 如果想要原生 websocket（非轮询），请安装 eventlet 并修改 async_mode
-                self.socketio.run(self.app, host="0.0.0.0", port=self.WS_PORT, debug=False, use_reloader=False)
-            except Exception as e:
-                logger.error(f"SocketIO 服务运行异常: {e}")
-
-        self.ws_thread = threading.Thread(target=_run_socketio, daemon=True)
+        # 后台线程启动WebSocket服务
+        self.ws_thread = threading.Thread(
+            target=self.socketio.run,
+            args=("0.0.0.0", self.WS_PORT),
+            kwargs={"debug": False},
+            daemon=True
+        )
         self.ws_thread.start()
         
         # 打印完整的连接信息
@@ -100,10 +95,6 @@ class Danmu(Star):
         """插件卸载时自动停止WebSocket服务"""
         if self.ws_thread and self.ws_thread.is_alive():
             logger.info("正在停止WebSocket弹幕服务...")
-            try:
-                # stop() 在不同 async_mode 下表现不同，尽量捕获异常
-                self.socketio.stop()
-            except Exception:
-                logger.info("socketio.stop() 无法在当前运行模式下调用，尝试直接等待线程退出。")
+            self.socketio.stop()
             self.ws_thread.join(timeout=2)
             logger.info("✅ WebSocket弹幕服务已停止")
