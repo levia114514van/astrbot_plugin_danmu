@@ -11,7 +11,7 @@ class Danmu(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         # ===================== 配置 =====================
-        self.WS_PORT = 5000        # 内网端口（NAT模式下和端口映射的内网端口一致）
+        self.WS_PORT = 19143        # 内网端口（NAT模式下和端口映射的内网端口一致）
         self.MAX_DANMU = 15        # 最多保留的弹幕历史数量
         # =================================================
         self.app = Flask(__name__)
