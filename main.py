@@ -1,27 +1,67 @@
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
+from flask import Flask
+from flask_socketio import SocketIO
+import threading
 
 @register("弹幕", "114514", "111111", "1.0.0")
 class Danmu(Star):
     def __init__(self, context: Context):
         super().__init__(context)
+        # ===================== 仅需修改这两个配置 =====================
+        self.WS_PORT = 5000        # 云服务器安全组开放的端口
+        self.MAX_DANMU = 15        # 最多保留的弹幕历史数量
+        # ============================================================
+        self.app = Flask(__name__)
+        self.socketio = SocketIO(self.app, cors_allowed_origins="*")
+        self.danmu_history = []
+        self.ws_thread = None
 
     async def initialize(self):
-        """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
+        """插件初始化时自动启动WebSocket服务"""
+        # 定义WebSocket连接处理
+        @self.socketio.on('connect')
+        def handle_connect():
+            logger.info("OBS客户端已连接WebSocket")
+            self.socketio.emit('init_danmu', self.danmu_history)
+        
+        # 后台线程启动WebSocket服务（不阻塞AstrBot主程序）
+        self.ws_thread = threading.Thread(
+            target=self.socketio.run,
+            args=("0.0.0.0", self.WS_PORT),
+            kwargs={"debug": False},
+            daemon=True
+        )
+        self.ws_thread.start()
+        logger.info(f"✅ WebSocket弹幕服务已启动，端口：{self.WS_PORT}")
 
-    # 注册指令的装饰器。指令名为 helloworld。注册成功后，发送 `/helloworld` 就会触发这个指令，并回复 `你好, {user_name}!`
     @filter.command("弹幕")
     async def read(self, event: AstrMessageEvent, msg: str = ""):
-        """这是一个 hello world 指令""" # 这是 handler 的描述，将会被解析方便用户了解插件内容。建议填写。
+        """发送弹幕到OBS直播画面"""
         user_name = event.get_sender_name()
-        message_str = event.message_str # 用户发的纯文本消息字符串
-        message_chain = event.get_messages() # 用户所发的消息的消息链 # from astrbot.api.message_components import *
+        message_str = event.message_str
+        message_chain = event.get_messages()
         logger.info(message_chain)
+        
         if not msg:
-            yield event.plain_result(f"{user_name}什么也没有说......") # 发送一条纯文本消息
+            # 空消息提示（保留原有逻辑）
+            yield event.plain_result(f"{user_name}请输入弹幕内容，格式：/弹幕 你要发送的内容")
         else:
-            yield event.plain_result(f"@{user_name}: {msg}") # 发送一条纯文本消息
+            # 替代原有yield，通过WebSocket发送弹幕到OBS
+            danmu_content = f"{user_name}：{msg}"
+            self.danmu_history.append(danmu_content)
+            if len(self.danmu_history) > self.MAX_DANMU:
+                self.danmu_history.pop(0)
+            self.socketio.emit('new_danmu', danmu_content)
+            
+            # 可选：在群里回复发送成功提示（不需要可以删掉这行）
+            yield event.plain_result(f"✅ 弹幕已发送：{msg}")
 
     async def terminate(self):
-        """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
+        """插件卸载时自动停止WebSocket服务"""
+        if self.ws_thread and self.ws_thread.is_alive():
+            logger.info("正在停止WebSocket弹幕服务...")
+            self.socketio.stop()
+            self.ws_thread.join(timeout=2)
+            logger.info("✅ WebSocket弹幕服务已停止")
