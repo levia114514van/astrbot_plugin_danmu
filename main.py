@@ -20,3 +20,6 @@ class Danmu(Star):
         logger.info(message_chain)
         yield event.plain_result(f"Hello, {user_name}, 你发了 {message_str}!") # 发送一条纯文本消息
 
+    async def terminate(self):
+        '''可选择实现 terminate 函数，当插件被卸载/停用时会调用。'''
+
