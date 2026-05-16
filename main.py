@@ -1,138 +1,88 @@
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
-import threading
+
 import asyncio
-import websockets
-import requests
+from obswebsocket import obsws, requests
 
-@register("弹幕", "114514", "111111", "1.0.0")
-class Danmu(Star):
-    def __init__(self, context: Context):
-        super().__init__(context)
-        # ===================== 配置 =====================
-        self.WS_PORT = 19143        # 内网端口
-        self.MAX_DANMU = 15        # 最多保留的弹幕历史数量
-        # =================================================
-        self.clients = set()       # 存储所有连接的客户端
-        self.danmu_history = []
-        self.ws_thread = None
-        self.public_ip = None
+OBS_HOST = "114.66.61.131"  # 例如 "123.45.67.89" 或 "my-obs.example.com"
+OBS_PORT = 19143                     # 你设置的端口号
+OBS_PASSWORD = "password"  # 你设置的密码
+OBS_TEXT_SOURCE_NAME = "DanmuSource"  # OBS 中用于显示弹幕的文本源名称
 
-    def get_public_ip(self):
-        """自动获取服务器公网IP"""
-        try:
-            services = [
-                'https://api.ipify.org',
-                'https://ident.me',
-                'https://ifconfig.me/ip'
-            ]
-            for service in services:
-                try:
-                    response = requests.get(service, timeout=5)
-                    if response.status_code == 200:
-                        return response.text.strip()
-                except:
-                    continue
-            return "获取失败"
-        except Exception as e:
-            logger.error(f"获取公网IP失败: {e}")
-            return "获取失败"
+async def send_to_obs(self, user_name, message):
+    """异步发送文本到 OBS 的指定文本源"""
+    loop = asyncio.get_running_loop()
+    # 使用 run_in_executor 将同步的 WebSocket 操作放入线程池，避免阻塞主线程
+    return await loop.run_in_executor(
+        None, 
+        self._send_to_obs_sync, 
+        user_name, 
+        message
+    )
 
-    async def handle_client(self, websocket):
-        """处理单个客户端连接"""
-        # 新客户端连接
-        self.clients.add(websocket)
-        logger.info(f"✅ 新客户端已连接，当前连接数: {len(self.clients)}")
-        
-        try:
-            # 发送历史弹幕
-            for msg in self.danmu_history:
-                await websocket.send(msg)
-            
-            # 保持连接，等待客户端消息（我们这里不需要接收客户端消息）
-            async for message in websocket:
-                pass
-        except websockets.exceptions.ConnectionClosed:
-            pass
-        finally:
-            # 客户端断开连接
-            self.clients.remove(websocket)
-            logger.info(f"❌ 客户端已断开，当前连接数: {len(self.clients)}")
+#test
+def _send_to_obs_sync(self, user_name, message):
+    try:
+        url = "http://192.168.68.119:19143/api/danmu"  # 同样需要穿透或公网
+        payload = {"user": user_name, "text": message}
+        resp = requests.post(url, json=payload, timeout=5)
+        if resp.status_code == 200:
+            logger.info(f"弹幕已发送至HTTP调试服务器: @{user_name}: {message}")
+            return True
+    except Exception as e:
+        logger.error(f"HTTP发送失败: {e}")
+    return False
 
-    async def broadcast(self, message):
-        """向所有连接的客户端广播消息"""
-        if self.clients:
-            await asyncio.gather(
-                *[client.send(message) for client in self.clients]
-            )
+# def _send_to_obs_sync(self, user_name, message):
+#     """同步执行：连接 OBS WebSocket 并更新文本源内容"""
+#     ws = None
+#     try:
+#         # 1. 创建并连接 WebSocket 客户端
+#         ws = obsws(OBS_HOST, OBS_PORT, OBS_PASSWORD)
+#         ws.connect()
 
-    def run_websocket_server(self):
-        """在独立线程中运行 WebSocket 服务"""
-        # 创建新的事件循环
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # 启动 WebSocket 服务
-        start_server = websockets.serve(
-            self.handle_client,
-            "0.0.0.0",
-            self.WS_PORT
-        )
-        
-        loop.run_until_complete(start_server)
-        loop.run_forever()
+#         # 2. 构造要显示的完整文本
+#         full_text = f"@{user_name}: {message}"
 
-    async def initialize(self):
-        """插件初始化时自动启动 WebSocket 服务"""
-        # 自动获取公网IP
-        self.public_ip = self.get_public_ip()
-        
-        # 后台线程启动 WebSocket 服务
-        self.ws_thread = threading.Thread(
-            target=self.run_websocket_server,
-            daemon=True
-        )
-        self.ws_thread.start()
-        
-        # 打印连接信息
-        logger.info("="*50)
-        logger.info("✅ 原生 WebSocket 弹幕服务已启动！")
-        logger.info(f"🌐 服务器公网IP: {self.public_ip}")
-        logger.info(f"🔌 内网端口: {self.WS_PORT}")
-        logger.info("="*50)
-        logger.info("📢 重要提示：")
-        logger.info("   江苏宿迁NAT服务器用户注意：")
-        logger.info("   1. 请在雨云控制台添加端口映射，内网端口填19143")
-        logger.info("   2. 使用雨云分配的 公网IP:外网端口 作为连接地址")
-        logger.info("   其他地区直接使用：")
-        logger.info(f"   ws://{self.public_ip}:{self.WS_PORT}")
-        logger.info("="*50)
+#         # 3. 调用 SetInputSettings 请求，更新指定文本源的文本内容
+#         ws.call(requests.SetInputSettings(
+#             inputName=OBS_TEXT_SOURCE_NAME,
+#             inputSettings={
+#                 "text": full_text
+#             }
+#         ))
+#         logger.info(f"成功发送弹幕到 OBS: {full_text}")
+#         return True
+#     except Exception as e:
+#         logger.error(f"OBS WebSocket 连接或发送失败: {e}")
+#         return False
+#     finally:
+#         # 4. 无论成功与否，确保断开连接
+#         if ws:
+#             try:
+#                 ws.disconnect()
+#             except:
+#                 pass
 
-    @filter.command("弹幕")
-    async def read(self, event: AstrMessageEvent, msg: str = ""):
-        """发送弹幕到OBS直播画面"""
-        user_name = event.get_sender_name()
-        
-        if not msg:
-            yield event.plain_result(f"{user_name}请输入弹幕内容，格式：/弹幕 你要发送的内容")
+
+@filter.command("弹幕")
+async def read(self, event: AstrMessageEvent, msg: str):
+    user_name = event.get_sender_name()
+    message_str = event.message_str
+    # ... (logger.info 等部分代码不变)
+
+    if not msg:
+        yield event.plain_result(f"{user_name}什么也没有说......")
+        return
+
+    # 发送弹幕到 OBS
+    try:
+        result = await self.send_to_obs(user_name, msg)
+        if result:
+            yield event.plain_result(f"弹幕已发送: @{user_name}: {msg}")
         else:
-            danmu_content = f"{user_name}：{msg}"
-            
-            # 保存历史弹幕
-            self.danmu_history.append(danmu_content)
-            if len(self.danmu_history) > self.MAX_DANMU:
-                self.danmu_history.pop(0)
-            
-            # 广播给所有客户端
-            await self.broadcast(danmu_content)
-            
-            yield event.plain_result(f"✅ 弹幕已发送：{msg}")
-
-    async def terminate(self):
-        """插件卸载时自动停止 WebSocket 服务"""
-        if self.ws_thread and self.ws_thread.is_alive():
-            logger.info("正在停止 WebSocket 弹幕服务...")
-            # 这里简单处理，直接终止线程
-            self.ws_thread.join(timeout=2)
-            logger.info("✅ WebSocket 弹幕服务已停止")
+            yield event.plain_result("弹幕发送失败，请检查 OBS 连接。")
+    except Exception as e:
+        logger.error(f"发送弹幕到 OBS 时发生错误: {e}")
+        yield event.plain_result("弹幕发送失败，请稍后重试。")
