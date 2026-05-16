@@ -21,49 +21,36 @@ async def send_to_obs(self, user_name, message):
         message
     )
 
-#test
 def _send_to_obs_sync(self, user_name, message):
+    """同步执行：连接 OBS WebSocket 并更新文本源内容"""
+    ws = None
     try:
-        url = "http://192.168.68.119:19143/api/danmu"  # 同样需要穿透或公网
-        payload = {"user": user_name, "text": message}
-        resp = requests.post(url, json=payload, timeout=5)
-        if resp.status_code == 200:
-            logger.info(f"弹幕已发送至HTTP调试服务器: @{user_name}: {message}")
-            return True
+        # 1. 创建并连接 WebSocket 客户端
+        ws = obsws(OBS_HOST, OBS_PORT, OBS_PASSWORD)
+        ws.connect()
+
+        # 2. 构造要显示的完整文本
+        full_text = f"@{user_name}: {message}"
+
+        # 3. 调用 SetInputSettings 请求，更新指定文本源的文本内容
+        ws.call(requests.SetInputSettings(
+            inputName=OBS_TEXT_SOURCE_NAME,
+            inputSettings={
+                "text": full_text
+            }
+        ))
+        logger.info(f"成功发送弹幕到 OBS: {full_text}")
+        return True
     except Exception as e:
-        logger.error(f"HTTP发送失败: {e}")
-    return False
-
-# def _send_to_obs_sync(self, user_name, message):
-#     """同步执行：连接 OBS WebSocket 并更新文本源内容"""
-#     ws = None
-#     try:
-#         # 1. 创建并连接 WebSocket 客户端
-#         ws = obsws(OBS_HOST, OBS_PORT, OBS_PASSWORD)
-#         ws.connect()
-
-#         # 2. 构造要显示的完整文本
-#         full_text = f"@{user_name}: {message}"
-
-#         # 3. 调用 SetInputSettings 请求，更新指定文本源的文本内容
-#         ws.call(requests.SetInputSettings(
-#             inputName=OBS_TEXT_SOURCE_NAME,
-#             inputSettings={
-#                 "text": full_text
-#             }
-#         ))
-#         logger.info(f"成功发送弹幕到 OBS: {full_text}")
-#         return True
-#     except Exception as e:
-#         logger.error(f"OBS WebSocket 连接或发送失败: {e}")
-#         return False
-#     finally:
-#         # 4. 无论成功与否，确保断开连接
-#         if ws:
-#             try:
-#                 ws.disconnect()
-#             except:
-#                 pass
+        logger.error(f"OBS WebSocket 连接或发送失败: {e}")
+        return False
+    finally:
+        # 4. 无论成功与否，确保断开连接
+        if ws:
+            try:
+                ws.disconnect()
+            except:
+                pass
 
 
 @filter.command("弹幕")
