@@ -5,71 +5,78 @@ from astrbot.api import logger
 import asyncio
 from obswebsocket import obsws, requests
 
-OBS_HOST = "114.66.61.131"  # 例如 "123.45.67.89" 或 "my-obs.example.com"
-OBS_PORT = 19143                     # 你设置的端口号
+OBS_HOST = "0.tcp.ap.ngrok.io"  # 例如 "123.45.67.89" 或 "my-obs.example.com"
+OBS_PORT = 16066                    # 你设置的端口号
 OBS_PASSWORD = "password"  # 你设置的密码
 OBS_TEXT_SOURCE_NAME = "DanmuSource"  # OBS 中用于显示弹幕的文本源名称
 
-async def send_to_obs(self, user_name, message):
-    """异步发送文本到 OBS 的指定文本源"""
-    loop = asyncio.get_running_loop()
-    # 使用 run_in_executor 将同步的 WebSocket 操作放入线程池，避免阻塞主线程
-    return await loop.run_in_executor(
-        None, 
-        self._send_to_obs_sync, 
-        user_name, 
-        message
-    )
+@register("弹幕插件", "114514", "11111", "1.0.0")
+class DanmuPlugin(Star):
+    def __init__(self, context: Context):
+        super().__init__(context)
 
-def _send_to_obs_sync(self, user_name, message):
-    """同步执行：连接 OBS WebSocket 并更新文本源内容"""
-    ws = None
-    try:
-        # 1. 创建并连接 WebSocket 客户端
-        ws = obsws(OBS_HOST, OBS_PORT, OBS_PASSWORD)
-        ws.connect()
+    @filter.command("弹幕")
+    async def read(self, event: AstrMessageEvent, msg: str):
+        user_name = event.get_sender_name()
+        message_chain = event.get_messages()
+        logger.info(f"收到弹幕消息链: {message_chain}")
 
-        # 2. 构造要显示的完整文本
-        full_text = f"@{user_name}: {message}"
+        if not msg or msg.strip() == "":
+            yield event.plain_result(f"{user_name} 什么也没有说......")
+            return
 
-        # 3. 调用 SetInputSettings 请求，更新指定文本源的文本内容
-        ws.call(requests.SetInputSettings(
-            inputName=OBS_TEXT_SOURCE_NAME,
-            inputSettings={
-                "text": full_text
-            }
-        ))
-        logger.info(f"成功发送弹幕到 OBS: {full_text}")
-        return True
-    except Exception as e:
-        logger.error(f"OBS WebSocket 连接或发送失败: {e}")
-        return False
-    finally:
-        # 4. 无论成功与否，确保断开连接
-        if ws:
-            try:
-                ws.disconnect()
-            except:
-                pass
+        # 发送到远程 OBS（或模拟服务器）
+        try:
+            result = await self.send_to_obs(user_name, msg)
+            if result:
+                yield event.plain_result(f"弹幕已发送: @{user_name}: {msg}")
+            else:
+                yield event.plain_result("弹幕发送失败，请检查 OBS 连接。")
+        except Exception as e:
+            logger.error(f"发送弹幕时发生异常: {e}")
+            yield event.plain_result("弹幕发送失败，内部错误。")
 
+    async def send_to_obs(self, user_name: str, message: str) -> bool:
+        """异步包装，避免阻塞机器人主循环"""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            self._send_to_obs_sync,
+            user_name,
+            message
+        )
 
-@filter.command("弹幕")
-async def read(self, event: AstrMessageEvent, msg: str):
-    user_name = event.get_sender_name()
-    message_str = event.message_str
-    # ... (logger.info 等部分代码不变)
+    def _send_to_obs_sync(self, user_name: str, message: str) -> bool:
+        """同步函数：连接 OBS WebSocket 并更新文本源"""
+        ws = None
+        try:
+            ws = obsws(OBS_HOST, OBS_PORT, OBS_PASSWORD)
+            ws.connect()
 
-    if not msg:
-        yield event.plain_result(f"{user_name}什么也没有说......")
-        return
+            full_text = f"@{user_name}: {message}"
 
-    # 发送弹幕到 OBS
-    try:
-        result = await self.send_to_obs(user_name, msg)
-        if result:
-            yield event.plain_result(f"弹幕已发送: @{user_name}: {msg}")
-        else:
-            yield event.plain_result("弹幕发送失败，请检查 OBS 连接。")
-    except Exception as e:
-        logger.error(f"发送弹幕到 OBS 时发生错误: {e}")
-        yield event.plain_result("弹幕发送失败，请稍后重试。")
+            # 调用 SetInputSettings 更新文本源
+            ws.call(requests.SetInputSettings(
+                inputName=OBS_TEXT_SOURCE_NAME,
+                inputSettings={
+                    "text": full_text
+                }
+            ))
+
+            logger.info(f"已成功发送弹幕: {full_text}")
+            return True
+
+        except Exception as e:
+            logger.error(f"OBS WebSocket 发送失败: {e}")
+            return False
+
+        finally:
+            if ws:
+                try:
+                    ws.disconnect()
+                except:
+                    pass
+
+    async def terminate(self):
+        """插件卸载时调用"""
+        pass
