@@ -7,7 +7,7 @@ from obswebsocket import obsws, requests
 
 # OBS_HOST = "0.tcp.ap.ngrok.io"  # 例如 "123.45.67.89" 或 "my-obs.example.com"
 # OBS_PORT = 16066                    # 你设置的端口号
-OBS_HOST = "114.66.61.131"
+OBS_HOST = "114.66.61.217"
 OBS_PORT = 19143
 OBS_PASSWORD = "password"  # 你设置的密码
 OBS_TEXT_SOURCE_NAME = "DanmuSource"  # OBS 中用于显示弹幕的文本源名称
